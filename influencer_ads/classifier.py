@@ -6,19 +6,20 @@ import json
 
 
 class ClovaAPI:
-    """Naver HyperCLOVA API 클라이언트"""
+    """Naver HyperCLOVA API 클라이언트 (최신 v3 API)"""
     
     def __init__(self, api_key: str, request_id: str):
         # Naver CLOVA Studio API Key (Naver Cloud Platform > CLOVA Studio에서 발급)
         self.api_key = api_key
         # 요청 추적을 위한 고유 ID (자동 생성됨)
         self.request_id = request_id
-        # HyperCLOVA X API 엔드포인트
-        self.api_url = "https://clovastudio.stream.ntruss.com/testapp/v1/chat-completions/HCX-003"
+        # HyperCLOVA X 최신 API 엔드포인트 (v3)
+        self.host = "https://clovastudio.stream.ntruss.com"
+        self.api_url = f"{self.host}/v3/chat-completions/HCX-005"
     
-    def chat(self, messages: list, temperature: float = 0.3, max_tokens: int = 1000) -> str:
+    def chat(self, messages: list, temperature: float = 0.5, max_tokens: int = 1000) -> str:
         """
-        HyperCLOVA Chat API 호출
+        HyperCLOVA Chat API 호출 (v3 API)
         
         Args:
             messages: 대화 메시지 리스트
@@ -28,31 +29,58 @@ class ClovaAPI:
         Returns:
             생성된 응답 텍스트
         """
+        # v3 API는 Authorization Bearer 토큰 방식 사용
         headers = {
-            "X-NCP-CLOVASTUDIO-API-KEY": self.api_key,  # CLOVA Studio API 키
-            "X-NCP-APIGW-API-KEY": self.api_key,  # API Gateway 키 (같은 값 사용)
+            "Authorization": f"Bearer {self.api_key}",  # Bearer 토큰 형식
             "X-NCP-CLOVASTUDIO-REQUEST-ID": self.request_id,  # 요청 추적 ID
             "Content-Type": "application/json; charset=utf-8"
         }
         
+        # v3 API의 메시지 형식 변환
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "role": msg["role"],
+                "content": [{
+                    "type": "text",
+                    "text": msg["content"]
+                }]
+            })
+        
         payload = {
-            "messages": messages,
+            "messages": formatted_messages,
             "topP": 0.8,
             "topK": 0,
             "maxTokens": max_tokens,
             "temperature": temperature,
-            "repeatPenalty": 5.0,
-            "stopBefore": [],
-            "includeAiFilters": True
+            "repetitionPenalty": 1.1,
+            "stop": [],
+            "includeAiFilters": True,
+            "seed": 0
         }
         
-        response = requests.post(self.api_url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            result_data = response.json()
-            return result_data['result']['message']['content']
-        else:
-            raise Exception(f"API 오류: {response.status_code} - {response.text}")
+        try:
+            response = requests.post(self.api_url, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                result_data = response.json()
+                # v3 API 응답 형식에 맞게 파싱
+                if 'result' in result_data and 'message' in result_data['result']:
+                    return result_data['result']['message']['content']
+                elif 'message' in result_data:
+                    # content가 배열 형태일 수 있음
+                    content = result_data['message'].get('content', '')
+                    if isinstance(content, list) and len(content) > 0:
+                        return content[0].get('text', '')
+                    return str(content)
+                else:
+                    return str(result_data)
+            else:
+                # 상세한 오류 정보 출력
+                error_detail = f"Status: {response.status_code}, Response: {response.text}"
+                raise Exception(f"API 오류: {error_detail}")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"네트워크 오류: {str(e)}")
 
 
 class SponsorshipClassifier:
